@@ -1365,3 +1365,46 @@ __global__ void KERNEL_clc_normalvectorforpst(int_t*g_str,int_t*g_end,part1*P1, 
 	}
 
 }
+
+// Particle Shifting Algorithm: computes max velocity and applies shifting if enabled
+void shifting(
+    dim3& b, dim3 t,
+    int_t* g_str, int_t* g_end,
+    part1* dev_P1, part2* dev_SP2, part3* dev_P3
+) {
+    // Allocate device arrays for velocity max computation
+    Real* max_umag = nullptr;
+    Real* d_max_umag0 = nullptr;
+    cudaMalloc((void**)&max_umag, sizeof(Real) * num_part3);
+    cudaMalloc((void**)&d_max_umag0, sizeof(Real));
+    cudaMemset(max_umag, 0, sizeof(Real) * num_part3);
+    cudaMemset(d_max_umag0, 0, sizeof(Real));
+
+    // Allocate CUB workspace for max reduction
+    void* dev_max_storage = nullptr;
+    size_t max_storage_bytes = 0;
+    cub::DeviceReduce::Max(dev_max_storage, max_storage_bytes, max_umag, d_max_umag0, num_part3);
+    cudaDeviceSynchronize();
+    cudaMalloc(&dev_max_storage, max_storage_bytes);
+
+    // Compute max velocity on device
+    kernel_copy_max_velocity<<<b, t>>>(dev_P1, dev_SP2, dev_P3, max_umag);
+    cudaDeviceSynchronize();
+
+    cub::DeviceReduce::Max(dev_max_storage, max_storage_bytes, max_umag, d_max_umag0, num_part3);
+    cudaDeviceSynchronize();
+
+    // Particle Shifting Technique (PST)
+    b.x = (num_part3 - 1) / t.x + 1;
+    if (pst_solve == 1) {
+        calculate_w_dx(dev_P1);
+        cudaDeviceSynchronize();
+        if (dim == 2)
+            KERNEL_clc_particle_shifting_oger2D<<<b, t>>>(g_str, g_end, dev_P1, dev_SP2, dev_P3, dt, d_max_umag0);
+        cudaDeviceSynchronize();
+    }
+
+    cudaFree(d_max_umag0);
+    cudaFree(max_umag);
+    cudaFree(dev_max_storage);
+}

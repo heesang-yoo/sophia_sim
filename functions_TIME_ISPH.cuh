@@ -288,3 +288,23 @@ __global__ void KERNEL_time_update_projection(const Real tdt,part1*P1,part1*TP1,
 	TP1[i].PPE2=P1[i].PPE2;
 }
 ////////////////////////////////////////////////////////////////////////
+
+// Projection step: computes pressure correction or velocity projection
+void projection(
+    dim3 b, dim3 t,
+    part1* dev_SP1, part2* dev_SP2, part3* dev_P3
+) {
+    KERNEL_clc_projection<<<b, t>>>(count, dt, time, dev_SP1, dev_SP2, dev_P3);
+    cudaDeviceSynchronize();
+}
+
+// Time update after projection step: update particle variables for the next time step
+void timeUpdateProjection(
+    dim3 b, dim3 t,
+    part1* dev_SP1, part1* dev_P1,
+    part2* dev_SP2, part2* dev_P2,
+    part3* dev_P3
+) {
+    KERNEL_time_update_projection<<<b, t>>>(dt, dev_SP1, dev_P1, dev_SP2, dev_P2, dev_P3);
+    cudaDeviceSynchronize();
+}

@@ -156,3 +156,21 @@ __global__ void KERNEL_smoothing_length2D(int_t*g_str,int_t*g_end,part1*P1){
 	// printf("P1[i].h=%e",P1[i].h);
 }
   
+// Set up the ALE (Arbitrary Lagrangian-Eulerian) domain and update alpha based on scheme type
+void setALEdomain(
+    dim3 b, dim3 t,
+    part1* dev_P1
+) {
+    // Set cell indices for each particle
+    KERNEL_set_ncell<<<b, t>>>(dev_P1, count);
+    cudaDeviceSynchronize();
+
+    // Set alpha based on the scheme (Lagrangian or ALE)
+    if (scheme == Lagrangian) {
+        KERNEL_set_alpha_Lagrangian<<<b, t>>>(dev_P1);
+        cudaDeviceSynchronize();
+    } else if (scheme == ALE) {
+        KERNEL_set_alpha<<<b, t>>>(dev_P1);
+        cudaDeviceSynchronize();
+    }
+}

@@ -68,15 +68,12 @@ char plot_data[20][20];           // Names of variables to plot
 #include "functions_PROP.cuh"
 #include "functions_KNL.cuh"
 #include "functions_PREP.cuh"
-#include "functions_MASS.cuh"
-#include "functions_INTERACTION.cuh"
-#include "functions_TIME.cuh"
 #include "functions_TIME_ISPH.cuh"
-#include "functions_OUTPUT.cuh"
-#include "functions_PST.cuh"
 #include "functions_ALE.cuh"
 #include "functions_BC.cuh"
 #include "functions_PPE.cuh"
+#include "functions_OUTPUT.cuh"
+#include "functions_PST.cuh"
 #include "ISPH_Calc.cuh"
 
 int main(int argc, char **argv)

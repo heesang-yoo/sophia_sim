@@ -1,3 +1,64 @@
+__device__ Real calc_kernel_wij_ipf(Real tH,Real rr){
+
+	Real tR,wij_ipf,tA;
+	tR=wij_ipf=0.0;
+	tA=1.0;
+	Real eps;
+	eps=tH/3.5;
+
+	if(k_IPF_kernel_type==Cosine){
+		if(k_kappa==1){
+		tR=rr/tH;
+		wij_ipf=-(tR<1)*tA*cos(3*PI/2*tR);}
+		else	if(k_kappa==2){
+		tR=rr/tH;
+		wij_ipf=-(tR<2)*tA*cos(3*PI/4*tR);}
+	}else	if(k_IPF_kernel_type==Gauss){
+		tR=rr/tH;
+		wij_ipf=(tR<1)*tA*exp(-pow(rr,2)/2/eps/eps);
+	}else	if(k_IPF_kernel_type==Modified_Gaussian){
+		tR=rr/tH;
+		wij_ipf=(tR<1)*tA*rr*exp(-pow(rr,2)/2/eps/eps);
+	}else	if(k_IPF_kernel_type==Cubic){
+		tR=rr/tH;
+		if(0<=tR&&tR<1/3)  wij_ipf=(tR<1)*tA*((3-3*tR)*(3-3*tR)*(3-3*tR)*(3-3*tR)*(3-3*tR)-6*(2-3*tR)*(2-3*tR)*(2-3*tR)*(2-3*tR)*(2-3*tR)+15*(1-3*tR)*(1-3*tR)*(1-3*tR)*(1-3*tR)*(1-3*tR));
+		if(1/3<=tR&&tR<2/3)  wij_ipf=(tR<1)*tA*((3-3*tR)*(3-3*tR)*(3-3*tR)*(3-3*tR)*(3-3*tR)-6*(2-3*tR)*(2-3*tR)*(2-3*tR)*(2-3*tR)*(2-3*tR));
+		if(2/3<=tR&&tR<1)  wij_ipf=(tR<1)*tA*((3-3*tR)*(3-3*tR)*(3-3*tR)*(3-3*tR)*(3-3*tR));
+	}else	if(k_IPF_kernel_type==Wend2){
+		tR=rr/tH*0.5;
+		wij_ipf=(tR<1)*tA*(1-tR)*(1-tR)*(1-tR)*(1-tR)*(1+4*tR);
+	}
+	return wij_ipf;
+}
+
+__device__ Real calc_kernel_wij_half(Real tH,Real rr){
+
+	Real tR,wij_half,tA;
+	tR=wij_half=0.0;
+	tA=1.0;
+	Real eps0;
+	eps0=tH/3.5*0.4;
+
+	if(k_IPF_kernel_type==Cosine){
+		tR=rr/tH;
+		wij_half=0.0;
+	}else	if(k_IPF_kernel_type==Gauss){
+		tR=rr/tH;
+		wij_half=(tR<1)*tA*exp(-pow(rr,2)/2/eps0/eps0);
+	}else	if(k_IPF_kernel_type==Modified_Gaussian){
+		tR=rr/tH;
+		wij_half=(tR<1)*tA*rr*exp(-pow(rr,2)/2/eps0/eps0);
+	}else	if(k_IPF_kernel_type==Cubic){
+		tR=rr/tH;
+		if(0<=(tR*2)&&(tR*2)<1/3)  wij_half=((tR*2)<1)*tA*((3-3*(tR*2))*(3-3*(tR*2))*(3-3*(tR*2))*(3-3*(tR*2))*(3-3*(tR*2))-6*(2-3*(tR*2))*(2-3*(tR*2))*(2-3*(tR*2))*(2-3*(tR*2))*(2-3*(tR*2))+15*(1-3*(tR*2))*(1-3*(tR*2))*(1-3*(tR*2))*(1-3*(tR*2))*(1-3*(tR*2)));
+		if(1/3<=(tR*2)&&(tR*2)<2/3)  wij_half=((tR*2)<1)*tA*((3-3*(tR*2))*(3-3*(tR*2))*(3-3*(tR*2))*(3-3*(tR*2))*(3-3*(tR*2))-6*(2-3*(tR*2))*(2-3*(tR*2))*(2-3*(tR*2))*(2-3*(tR*2))*(2-3*(tR*2)));
+		if(2/3<=(tR*2)&&(tR*2)<1)  wij_half=((tR*2)<1)*tA*((3-3*(tR*2))*(3-3*(tR*2))*(3-3*(tR*2))*(3-3*(tR*2))*(3-3*(tR*2)));
+	}else	if(k_IPF_kernel_type==Wend2){
+		tR=rr/tH*0.5;
+		wij_half=((tR*2)<1)*tA*(1-(tR*2))*(1-(tR*2))*(1-(tR*2))*(1-(tR*2))*(1+4*(tR*2));
+	}
+	return wij_half;
+}
 ////////////////////////////////////////////////////////////////////////
 __global__ void KERNEL_PPE2D(Real tdt, int_t*g_str,int_t*g_end,part1*P1,part2*P2,part3*P3,int it)
 {
@@ -476,7 +537,7 @@ __global__ void KERNEL_advection_force2D(Real ttime,int_t inout,int_t*g_str,int_
 }
 
 ////////////////////////////////////////////////////////////////////////
-__global__ void KERNEL_pressureforce2D(int_t inout,int_t*g_str,int_t*g_end,part1*P1,part2*P2,part3*P3)
+__global__ void KERNEL_pressure_force2D(int_t inout,int_t*g_str,int_t*g_end,part1*P1,part2*P2,part3*P3)
 {
 	uint_t i=threadIdx.x+blockIdx.x*blockDim.x;
 	if(i>=k_num_part3) return;
@@ -1094,158 +1155,196 @@ __global__ void KERNEL_advection_force3D(int_t inout,int_t*g_str,int_t*g_end,par
 	if(k_concn_solve) P3[i].dconcn=tmp_Rd;
 }
 ////////////////////////////////////////////////////////////////////////
-__global__ void KERNEL_pressureforce3D(int_t inout,int_t*g_str,int_t*g_end,part1*P1,part2*P2,part3*P3)
-	{
-		uint_t i=threadIdx.x+blockIdx.x*blockDim.x;
-		if(i>=k_num_part2) return;
-		if(P1[i].i_type>i_type_crt) return;
-		// if(k_open_boundary>0 && P1[i].buffer_type>0) return;
-		if(P1[i].p_type>=1000)	return;		// Immersed Boundary Method
-		if(P1[i].p_type<=0)	return;		// Immersed Boundary Method
-	
-		int_t ptypei;
-		int_t icell,jcell,kcell;
-		Real xi,yi,zi,uxi,uyi,uzi,kci,eta;
-		Real pi,hi,mi,mi8,mri,rhoi,tempi,visi,betai;
-		Real diffi,concni;
-		Real nxi,nyi,nzi,nmagi,sigmai;			// for surface tension
-		Real nx_ci,ny_ci,nz_ci,nmag_ci,curvi; 	// for surface tension
-		Real search_range,tmp_A,tmp_Rc,tmp_Rd;
-		Real tmpx,tmpy,tmpz,tmpn,tmpd;
-		Real tmp_fsn, tmp_fsd;
-		Real tmppx,tmppy,tmppz;
-	
-		ptypei=P1[i].p_type;
-	
-		xi=P1[i].x;
-		yi=P1[i].y;
-		zi=P1[i].z;
-		uxi=P1[i].ux;
-		uyi=P1[i].uy;
-		uzi=P1[i].uz;
-		hi=P1[i].h;
-		tempi=P1[i].temp;
-		pi=P1[i].pres;
-		mi=P1[i].m;
-		rhoi=P1[i].rho;
-	
-		tmp_A=calc_tmpA(hi);
-		search_range=k_search_kappa*hi;	// search range
-	
-		if((k_fs_solve)&&(k_surf_model==2)){
-	
-			nxi=P3[i].nx;
-			nyi=P3[i].ny;
-			nzi=P3[i].nz;
-	
-			nmagi=P3[i].nmag;
-			nx_ci=P3[i].nx_c;
-			ny_ci=P3[i].ny_c;
-			nz_ci=P3[i].nz_c;
-	
-			nmag_ci=P3[i].nmag_c;
-	
-			sigmai=sigma(tempi,ptypei);
-		}
-	
-		if(k_con_solve){
-			eta=0.001*hi;
-			kci=conductivity(tempi,ptypei);
-		}
-		if(k_concn_solve){
-			concni=P1[i].concn;
-			diffi=diffusion_coefficient(tempi,ptypei);
-		}
-	
-		mi8=0.08/mi; // .. interface force
-		mri=(mi/rhoi);
-	
-		// visi=viscosity(tempi,ptypei)+P3[i].vis_t;
-		betai=thermal_expansion(tempi,ptypei);
-	
-		// calculate I,J,K in cell
-		if((k_x_max==k_x_min)){icell=0;}
-		else{icell=min(floor((xi-k_x_min)/k_dcell),k_NI-1);}
-		if((k_y_max==k_y_min)){jcell=0;}
-		else{jcell=min(floor((yi-k_y_min)/k_dcell),k_NJ-1);}
-		if((k_z_max==k_z_min)){kcell=0;}
-		else{kcell=min(floor((zi-k_z_min)/k_dcell),k_NK-1);}
-		// out-of-range handling
-		if(icell<0) icell=0;	if(jcell<0) jcell=0;	if(kcell<0) kcell=0;
-	
-		tmpx=tmpy=tmpz=0.0;
-		tmpn=0.0;
-		tmpd=1.0;
-		tmp_Rc=0.0;
-		tmp_Rd=0.0;
-		tmp_fsn=0.0;
-		tmp_fsd=0.0;
-		tmppx=tmppy=tmppz=0.0;
-	
-		for(int_t z=-P1[i].ncell;z<=P1[i].ncell;z++){
-			for(int_t y=-P1[i].ncell;y<=P1[i].ncell;y++){
-				for(int_t x=-P1[i].ncell;x<=P1[i].ncell;x++){
-					// int_t k=(icell+x)+k_NI*(jcell+y)+k_NI*k_NJ*(kcell+z);
-					int_t k=idx_cell(icell+x,jcell+y,kcell+z);
-	
-					if(((icell+x)<0)||((icell+x)>(k_NI-1))||((jcell+y)<0)||((jcell+y)>(k_NJ-1))||((kcell+z)<0)||((kcell+z)>(k_NK-1))) continue;
-					if(g_str[k]!=cu_memset){
-						int_t fend=g_end[k];
-						for(int_t j=g_str[k];j<fend;j++){
-							Real xj,yj,zj,tdist;
-							xj=P1[j].x;
-							yj=P1[j].y;
-							zj=P1[j].z;
-	
-							tdist=sqrt((xi-xj)*(xi-xj)+(yi-yj)*(yi-yj)+(zi-zj)*(zi-zj))+1e-20;
-							if(tdist<search_range){
-								int_t ptypej;
-								Real tdwx,tdwy,tdwz,uxj,uyj,uzj,mj,tempj,rhoj,pj,hj,kcj,sum_con_H,diffj,concnj,tmprd;
-								Real nx_cj,ny_cj,nz_cj,nmag_cj,Phi_s,tmpnt;	// for surface tension
-	
-								Real twij=calc_kernel_wij(tmp_A,hi,tdist);
-								Real tdwij=calc_kernel_dwij(tmp_A,hi,tdist);
-	
-								tdwx=tdwij*(xi-xj)/tdist;
-								tdwy=tdwij*(yi-yj)/tdist;
-								tdwz=tdwij*(zi-zj)/tdist;
-	
-	
-								if(k_kgc_solve>0){
-									apply_gradient_correction_3D(P3[i].Cm,twij,tdwx,tdwy,tdwz,&tdwx,&tdwy,&tdwz);
-								}
-	
-								ptypej=P1[j].p_type;
-								uxj=P1[j].ux;
-								uyj=P1[j].uy;
-								uzj=P1[j].uz;
-								mj=P1[j].m;
-								tempj=P1[j].temp;
-								rhoj=P1[j].rho;
-								pj=P1[j].pres;
-								hj=P1[j].h;
-	
-	
-								if(k_fp_solve){
-									Real C_p=-mj*(pi+pj)/(rhoi*rhoj);
-									tmpx+=C_p*tdwx;
-									tmpy+=C_p*tdwy;
-									tmpz+=C_p*tdwz;
-									tmppx=C_p*tdwx;
-									tmppy=C_p*tdwy;
-									tmppz=C_p*tdwz;
+__global__ void KERNEL_pressure_force3D(int_t inout,int_t*g_str,int_t*g_end,part1*P1,part2*P2,part3*P3)
+{
+	uint_t i=threadIdx.x+blockIdx.x*blockDim.x;
+	if(i>=k_num_part2) return;
+	if(P1[i].i_type>i_type_crt) return;
+	// if(k_open_boundary>0 && P1[i].buffer_type>0) return;
+	if(P1[i].p_type>=1000)	return;		// Immersed Boundary Method
+	if(P1[i].p_type<=0)	return;		// Immersed Boundary Method
 
-								}
+	int_t ptypei;
+	int_t icell,jcell,kcell;
+	Real xi,yi,zi,uxi,uyi,uzi,kci,eta;
+	Real pi,hi,mi,mi8,mri,rhoi,tempi,visi,betai;
+	Real diffi,concni;
+	Real nxi,nyi,nzi,nmagi,sigmai;			// for surface tension
+	Real nx_ci,ny_ci,nz_ci,nmag_ci,curvi; 	// for surface tension
+	Real search_range,tmp_A,tmp_Rc,tmp_Rd;
+	Real tmpx,tmpy,tmpz,tmpn,tmpd;
+	Real tmp_fsn, tmp_fsd;
+	Real tmppx,tmppy,tmppz;
+
+	ptypei=P1[i].p_type;
+
+	xi=P1[i].x;
+	yi=P1[i].y;
+	zi=P1[i].z;
+	uxi=P1[i].ux;
+	uyi=P1[i].uy;
+	uzi=P1[i].uz;
+	hi=P1[i].h;
+	tempi=P1[i].temp;
+	pi=P1[i].pres;
+	mi=P1[i].m;
+	rhoi=P1[i].rho;
+
+	tmp_A=calc_tmpA(hi);
+	search_range=k_search_kappa*hi;	// search range
+
+	if((k_fs_solve)&&(k_surf_model==2)){
+
+		nxi=P3[i].nx;
+		nyi=P3[i].ny;
+		nzi=P3[i].nz;
+
+		nmagi=P3[i].nmag;
+		nx_ci=P3[i].nx_c;
+		ny_ci=P3[i].ny_c;
+		nz_ci=P3[i].nz_c;
+
+		nmag_ci=P3[i].nmag_c;
+
+		sigmai=sigma(tempi,ptypei);
+	}
+
+	if(k_con_solve){
+		eta=0.001*hi;
+		kci=conductivity(tempi,ptypei);
+	}
+	if(k_concn_solve){
+		concni=P1[i].concn;
+		diffi=diffusion_coefficient(tempi,ptypei);
+	}
+
+	mi8=0.08/mi; // .. interface force
+	mri=(mi/rhoi);
+
+	// visi=viscosity(tempi,ptypei)+P3[i].vis_t;
+	betai=thermal_expansion(tempi,ptypei);
+
+	// calculate I,J,K in cell
+	if((k_x_max==k_x_min)){icell=0;}
+	else{icell=min(floor((xi-k_x_min)/k_dcell),k_NI-1);}
+	if((k_y_max==k_y_min)){jcell=0;}
+	else{jcell=min(floor((yi-k_y_min)/k_dcell),k_NJ-1);}
+	if((k_z_max==k_z_min)){kcell=0;}
+	else{kcell=min(floor((zi-k_z_min)/k_dcell),k_NK-1);}
+	// out-of-range handling
+	if(icell<0) icell=0;	if(jcell<0) jcell=0;	if(kcell<0) kcell=0;
+
+	tmpx=tmpy=tmpz=0.0;
+	tmpn=0.0;
+	tmpd=1.0;
+	tmp_Rc=0.0;
+	tmp_Rd=0.0;
+	tmp_fsn=0.0;
+	tmp_fsd=0.0;
+	tmppx=tmppy=tmppz=0.0;
+
+	for(int_t z=-P1[i].ncell;z<=P1[i].ncell;z++){
+		for(int_t y=-P1[i].ncell;y<=P1[i].ncell;y++){
+			for(int_t x=-P1[i].ncell;x<=P1[i].ncell;x++){
+				// int_t k=(icell+x)+k_NI*(jcell+y)+k_NI*k_NJ*(kcell+z);
+				int_t k=idx_cell(icell+x,jcell+y,kcell+z);
+
+				if(((icell+x)<0)||((icell+x)>(k_NI-1))||((jcell+y)<0)||((jcell+y)>(k_NJ-1))||((kcell+z)<0)||((kcell+z)>(k_NK-1))) continue;
+				if(g_str[k]!=cu_memset){
+					int_t fend=g_end[k];
+					for(int_t j=g_str[k];j<fend;j++){
+						Real xj,yj,zj,tdist;
+						xj=P1[j].x;
+						yj=P1[j].y;
+						zj=P1[j].z;
+
+						tdist=sqrt((xi-xj)*(xi-xj)+(yi-yj)*(yi-yj)+(zi-zj)*(zi-zj))+1e-20;
+						if(tdist<search_range){
+							int_t ptypej;
+							Real tdwx,tdwy,tdwz,uxj,uyj,uzj,mj,tempj,rhoj,pj,hj,kcj,sum_con_H,diffj,concnj,tmprd;
+							Real nx_cj,ny_cj,nz_cj,nmag_cj,Phi_s,tmpnt;	// for surface tension
+
+							Real twij=calc_kernel_wij(tmp_A,hi,tdist);
+							Real tdwij=calc_kernel_dwij(tmp_A,hi,tdist);
+
+							tdwx=tdwij*(xi-xj)/tdist;
+							tdwy=tdwij*(yi-yj)/tdist;
+							tdwz=tdwij*(zi-zj)/tdist;
+
+
+							if(k_kgc_solve>0){
+								apply_gradient_correction_3D(P3[i].Cm,twij,tdwx,tdwy,tdwz,&tdwx,&tdwy,&tdwz);
+							}
+
+							ptypej=P1[j].p_type;
+							uxj=P1[j].ux;
+							uyj=P1[j].uy;
+							uzj=P1[j].uz;
+							mj=P1[j].m;
+							tempj=P1[j].temp;
+							rhoj=P1[j].rho;
+							pj=P1[j].pres;
+							hj=P1[j].h;
+
+
+							if(k_fp_solve){
+								Real C_p=-mj*(pi+pj)/(rhoi*rhoj);
+								tmpx+=C_p*tdwx;
+								tmpy+=C_p*tdwy;
+								tmpz+=C_p*tdwz;
+								tmppx=C_p*tdwx;
+								tmppy=C_p*tdwy;
+								tmppz=C_p*tdwz;
+
 							}
 						}
 					}
-			}
+				}
 		}
-		}
-	
-		P3[i].fpx=tmpx;
-		P3[i].fpy=tmpy;
-		P3[i].fpz=tmpz;
+	}
+	}
 
+	P3[i].fpx=tmpx;
+	P3[i].fpy=tmpy;
+	P3[i].fpz=tmpz;
 	
+}
+
+// Apply advection force kernel (2D or 3D)
+void advectionForce(
+    dim3 b, dim3 t,
+    int_t* g_str, int_t* g_end,
+    part1* dev_SP1, part2* dev_SP2, part3* dev_P3
+) {
+    if (dim == 2)
+        KERNEL_advection_force2D<<<b, t>>>(time, 1, g_str, g_end, dev_SP1, dev_SP2, dev_P3);
+    if (dim == 3)
+        KERNEL_advection_force3D<<<b, t>>>(1, g_str, g_end, dev_SP1, dev_SP2, dev_P3);
+    cudaDeviceSynchronize();
+}
+
+// Apply pressure (PPE) force kernel (2D or 3D)
+void pressureForce(
+    dim3 b, dim3 t,
+    int_t* g_str, int_t* g_end,
+    part1* dev_SP1, part2* dev_SP2, part3* dev_P3
+) {
+	if (dim == 2)
+        KERNEL_pressure_force2D<<<b, t>>>(1, g_str, g_end, dev_SP1, dev_SP2, dev_P3);
+    if (dim == 3)
+        KERNEL_pressure_force3D<<<b, t>>>(1, g_str, g_end, dev_SP1, dev_SP2, dev_P3);
+    cudaDeviceSynchronize();
+}
+
+// Pressure Poisson Equation (PPE) Solver: applies the PPE CUDA kernel (2D or 3D)
+void PPE(
+    dim3 b, dim3 t,
+    int_t* g_str, int_t* g_end,
+    part1* dev_SP1, part2* dev_SP2, part3* dev_P3
+) {
+    if (dim == 2)
+        KERNEL_PPE2D<<<b, t>>>(dt, g_str, g_end, dev_SP1, dev_SP2, dev_P3, 0);
+    if (dim == 3)
+        KERNEL_PPE3D<<<b, t>>>(dt, g_str, g_end, dev_SP1, dev_SP2, dev_P3);
+    cudaDeviceSynchronize();
 }

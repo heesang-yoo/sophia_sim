@@ -804,9 +804,33 @@ else	tmp_hij=P1[i].h;
 			}else{
 			P1[i].pres=-tpres/tflt_s;
 			}
-
 		}
+}
 
+// Apply velocity boundary condition (no-slip or penetration) to wall boundaries
+void velocityBC(
+    dim3 b, dim3 t,
+    int_t* g_str, int_t* g_end,
+    part1* dev_SP1
+) {
+    if ((noslip_bc == 1) || (penetration_solve == 1)) {
+        if (dim == 2)
+            KERNEL_boundary2D<<<b, t>>>(g_str, g_end, dev_SP1);
+        if (dim == 3)
+            KERNEL_boundary3D<<<b, t>>>(g_str, g_end, dev_SP1);
+        cudaDeviceSynchronize();
+    }
+}
 
-
+// Apply pressure (Neumann) boundary condition to wall boundaries
+void pressureBC(
+    dim3 b, dim3 t,
+    int_t* g_str, int_t* g_end,
+    part1* dev_SP1, part2* dev_SP2, part3* dev_P3
+) {
+    if (dim == 2)
+        KERNEL_Neumann_boundary2D<<<b, t>>>(g_str, g_end, dev_SP1, dev_SP2, dev_P3);
+    if (dim == 3)
+        KERNEL_Neumann_boundary3D<<<b, t>>>(g_str, g_end, dev_SP1, dev_SP2, dev_P3);
+    cudaDeviceSynchronize();
 }

@@ -1026,3 +1026,22 @@ __global__ void KERNEL_clc_correction_Laplacian(int_t*g_str,int_t*g_end,part1*P1
 	P3[i].L22=tL22;
 
 }
+
+// Preparation step before the main solver: applies gradient correction and pre-processing kernels
+void preparation(
+    dim3 b, dim3 t,
+    int_t* g_str, int_t* g_end,
+    part1* dev_SP1, part2* dev_SP2, part3* dev_P3
+) {
+    // Apply gradient correction (host or device function)
+    gradient_correction(g_str, g_end, dev_SP1, dev_P3);
+    cudaDeviceSynchronize();
+
+    // Apply pre-processing kernel depending on dimension
+    if (dim == 2)
+        KERNEL_clc_prep2D<<<b, t>>>(g_str, g_end, dev_SP1, dev_SP2, dev_P3, count);
+    if (dim == 3)
+        KERNEL_clc_prep3D<<<b, t>>>(g_str, g_end, dev_SP1, dev_SP2, dev_P3, count);
+
+    cudaDeviceSynchronize();
+}

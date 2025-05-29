@@ -796,3 +796,94 @@ if (!strncmp(data_label,"color",3)) {
 
 	fclose(outFile_vtk);
 }
+
+void pressureprobe(Real ttime,part1*P1,part3*P3,Real*time0,Real*p0,Real*p1,Real*p2,Real*p3,Real*ttime0,Real*PP0,Real*PP1,Real*PP2,Real*PP3){
+	int_t nop = num_part2;
+	int_t nop_r = 0;
+
+	Real pres0, num0;
+	Real pres1, num1;
+	Real pres2, num2;
+	Real pres3, num3;
+	pres0=pres1=pres2=pres3=0.0;
+	num0=num1=num2=num3=0.0;
+	Real x_m2 = -0.3;
+	Real y_m2 = 0.02;
+	Real x_m1 = 0.3-0.02;
+	Real y_m1 = 0.3;
+	Real h_m1 = 0.0;
+
+	Real height = 0.3;
+	Real LW = 3.366*height;
+	Real nonp = 1000.0*9.8*height;
+	Real h0 = P1[0].h;
+	Real tA;
+	tA=3.546881588905096/(kappa*h0)/(kappa*h0);
+
+	for(int i=0;i<nop;i++){
+		Real xi = P1[i].x;
+		Real yi = P1[i].y;
+		Real twij=0.0;
+		Real tdist=0.0;
+		Real tR=0.0;
+
+		if(((abs(yi-y_m2))<kappa*h0)&&(abs(xi-x_m2)<kappa*h0)&&(P1[i].i_type<3)){
+			tdist = sqrt(abs(yi-y_m2)*abs(yi-y_m2)+abs(xi-x_m2)*abs(xi-x_m2));
+			tR=tdist/h0/kappa;
+			twij=(tR<1)*tA*(1-tR)*(1-tR)*(1-tR)*(1-tR)*(1-tR)*(1-tR)*(1-tR)*(1-tR)*(1+8*tR+25*tR*tR+32*tR*tR*tR);
+			pres0+=P1[i].pres*twij;
+			num0+=twij;
+		}
+
+		if((abs(xi-x_m1)<h0/1.5)&&(P1[i].i_type<3)&&(P1[i].p_type==1)){
+			if(yi>h_m1) h_m1 = yi;
+		}
+
+	}
+
+	*p0=pres0/(num0+1e-10)/nonp;
+	*p1=h_m1;
+	*time0=ttime;
+
+	char FileName[512];
+	sprintf(FileName,"./record/probe.txt",count);
+	FILE*outFile;
+	outFile=fopen(FileName,"w");
+
+	fprintf(outFile,"probe \n\n");
+
+	for (int i=0; i<(time_end/time_output); i++){
+	fprintf(outFile, "%d\tt=%f\tp0=%f\th0=%f\n",i, ttime0[i]*sqrt(9.8/height),PP0[i],PP1[i]);
+	}
+	fclose(outFile);
+}
+
+// Save simulation output (VTK files, pressure probe, etc) at regular intervals
+void saveOutput(
+    int_t* plotcount,
+    part1* file_P1, part2* file_P2, part3* file_P3,
+    part1* dev_P1, part2* dev_SP2, part3* dev_P3,
+    Real* time0, Real* P0, Real* P1, Real* P2, Real* P3
+) {
+    if ((time >= plotcount[0] * time_output) && (time < (plotcount[0] + 1) * time_output)) {
+        plotcount[0] += 1;
+
+        int_t integer = ceil(time / time_output - 0.5);
+
+        printf("save plot...........................\n");
+        cudaMemcpy(file_P1, dev_P1, num_part3 * sizeof(part1), cudaMemcpyDeviceToHost);
+        cudaMemcpy(file_P2, dev_SP2, num_part3 * sizeof(part2), cudaMemcpyDeviceToHost);
+        cudaMemcpy(file_P3, dev_P3, num_part3 * sizeof(part3), cudaMemcpyDeviceToHost);
+
+        save_vtk_bin_single(file_P1, file_P2, file_P3);
+
+        if (count == 0)
+            save_plot_fluid_vtk_bin_boundary(file_P1);
+
+        pressureprobe(time, file_P1, file_P3,
+                      &time0[integer], &P0[integer], &P1[integer], &P2[integer], &P3[integer],
+                      time0, P0, P1, P2, P3);
+
+        printf("time = %5.6f\n\n\n", time);
+    }
+}

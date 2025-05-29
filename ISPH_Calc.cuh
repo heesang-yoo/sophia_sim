@@ -13,160 +13,56 @@ void SOPHIA_single_ISPH(int_t*g_idx,int_t*p_idx,int_t*g_idx_in,int_t*p_idx_in,in
 	b.x=(num_part3-1)/t.x+1;
 	int_t s=sizeof(int_t)*(t.x+1);
 
+	// Set up ALE domain (update cell indices, alpha values)
+	setALEdomain(b, t, dev_P1);
 
-	KERNEL_set_ncell<<<b,t>>>(dev_P1,count);
-	cudaDeviceSynchronize();
-
-	if(scheme==Lagrangian){
-	KERNEL_set_alpha_Lagrangian<<<b,t>>>(dev_P1);
-	cudaDeviceSynchronize();
-	}else if(scheme==ALE){
-	KERNEL_set_alpha<<<b,t>>>(dev_P1);
-	}
-
-
-	//-------------------------------------------------------------------------------------------------
-	// 주변입자 검색
-	//-------------------------------------------------------------------------------------------------
-
-	// Call NNPS for neighbor search and sorting
+	// Perform neighbor search and particle sorting (NNPS)
 	NNPS(
-		g_idx_in, g_idx,
-		p_idx_in, p_idx,
-		g_str, g_end,
-		dev_P1, dev_SP1,
-		dev_P2, dev_SP2,
+		g_idx_in, g_idx, p_idx_in, p_idx, g_str, g_end,
+		dev_P1, dev_SP1, dev_P2, dev_SP2,
 		dev_sort_storage, sort_storage_bytes,
 		b, t, s
 	);
 
-	//-------------------------------------------------------------------------------------------------
-	// 압력힘을 제외한 힘 계산
-	//-------------------------------------------------------------------------------------------------
+	// Enforce velocity boundary conditions (no-slip, penetration, etc.)
+	velocityBC(b, t, g_str, g_end, dev_SP1);
 
-	// Velocity condition for wall
-	if((noslip_bc==1)||(penetration_solve==1)){
-		if(dim==2) KERNEL_boundary2D<<<b,t>>>(g_str,g_end,dev_SP1);
-		if(dim==3) KERNEL_boundary3D<<<b,t>>>(g_str,g_end,dev_SP1);
-		cudaDeviceSynchronize();
-	}
-			
-	if(dim==2) KERNEL_advection_force2D<<<b,t>>>(time,1,g_str,g_end,dev_SP1,dev_SP2,dev_P3);
-	if(dim==3) KERNEL_advection_force3D<<<b,t>>>(1,g_str,g_end,dev_SP1,dev_SP2,dev_P3);
-	cudaDeviceSynchronize();
+	// Compute advection term (predictor step)
+	advectionForce(b, t, g_str, g_end, dev_SP1, dev_SP2, dev_P3);
 
-	//-------------------------------------------------------------------------------------------------
-	// PREDICTOR (Optional)
-	//-------------------------------------------------------------------------------------------------
+	// Apply velocity projection
+	projection(b, t, dev_SP1, dev_SP2, dev_P3);
 
-	KERNEL_clc_projection<<<b,t>>>(count,dt,time,dev_SP1,dev_SP2,dev_P3);
-	cudaDeviceSynchronize();
+	// Prepare (gradient correction, variable updates) before pressure solve
+	preparation(b, t, g_str, g_end, dev_SP1, dev_SP2, dev_P3);
 
-	//-------------------------------------------------------------------------------------------------
-	// 계산 준비: gradient correction, filter, reference density, p_type switch, penetration, density gradient
-	//-------------------------------------------------------------------------------------------------
+	// Set initial pressure boundary conditions (only at first step)
+	if (count == 0)
+		pressureBC(b, t, g_str, g_end, dev_SP1, dev_SP2, dev_P3);
 
-	gradient_correction(g_str,g_end,dev_SP1,dev_P3);
-	cudaDeviceSynchronize();
+	// Solve Pressure Poisson Equation (PPE)
+	PPE(b, t, g_str, g_end, dev_SP1, dev_SP2, dev_P3);
 
-	if(dim==2) KERNEL_clc_prep2D<<<b,t>>>(g_str,g_end,dev_SP1, dev_SP2, dev_P3, count);
-	if(dim==3) KERNEL_clc_prep3D<<<b,t>>>(g_str,g_end,dev_SP1, dev_SP2, dev_P3, count);
-	cudaDeviceSynchronize();
+	// Enforce pressure boundary conditions (Neumann, Dirichlet, etc.)
+	pressureBC(b, t, g_str, g_end, dev_SP1, dev_SP2, dev_P3);
 
-	//-------------------------------------------------------------------------------------------------
-	// 압력 계산
-	//-------------------------------------------------------------------------------------------------
+	//  Calculate pressure force and update acceleration
+	pressureForce(b, t, g_str, g_end, dev_SP1, dev_SP2, dev_P3);
 
-	// For initial condition
-	if(count==0){
-		if(dim==2)	KERNEL_Neumann_boundary2D<<<b,t>>>(g_str,g_end,dev_SP1,dev_SP2,dev_P3);
-		if(dim==3)	KERNEL_Neumann_boundary3D<<<b,t>>>(g_str,g_end,dev_SP1,dev_SP2,dev_P3);
-		cudaDeviceSynchronize();
-	}
+	//  Update all time-dependent variables and particle positions
+	timeUpdateProjection(b, t, dev_SP1, dev_P1, dev_SP2, dev_P2, dev_P3);
 
-	if(dim==2)	KERNEL_PPE2D<<<b,t>>>(dt,g_str,g_end,dev_SP1,dev_SP2,dev_P3,0);
-	if(dim==3)	KERNEL_PPE3D<<<b,t>>>(dt,g_str,g_end,dev_SP1,dev_SP2,dev_P3);
-	cudaDeviceSynchronize();
+	//  Apply particle shifting technique (PST) for improved regularity
+	shifting(b, t, g_str, g_end, dev_P1, dev_SP2, dev_P3);
 
-	// Pressure condition for wall
-	if(dim==2)	KERNEL_Neumann_boundary2D<<<b,t>>>(g_str,g_end,dev_SP1,dev_SP2,dev_P3);
-	if(dim==3)	KERNEL_Neumann_boundary3D<<<b,t>>>(g_str,g_end,dev_SP1,dev_SP2,dev_P3);
-	cudaDeviceSynchronize();
+	// Save particle data for visualization or further analysis
+	saveOutput(
+		plotcount,
+		file_P1, file_P2, file_P3,
+		dev_P1, dev_SP2, dev_P3,
+		time0, P0, P1, P2, P3
+	);
 
-	//-------------------------------------------------------------------------------------------------
-	// 압력힘 계산
-	//-------------------------------------------------------------------------------------------------
-
-	b.x=(num_part3-1)/t.x+1;
-	if(dim==2) KERNEL_pressureforce2D<<<b,t>>>(1,g_str,g_end,dev_SP1,dev_SP2,dev_P3);
-	if(dim==3) KERNEL_pressureforce3D<<<b,t>>>(1,g_str,g_end,dev_SP1,dev_SP2,dev_P3);
-	cudaDeviceSynchronize();
-
-
-	//-------------------------------------------------------------------------------------------------
-	// 시간 적분 (Time Integration)
-	//-------------------------------------------------------------------------------------------------
-
-	b.x=(num_part3-1)/t.x+1;
-	KERNEL_time_update_projection<<<b,t>>>(dt,dev_SP1,dev_P1,dev_SP2,dev_P2,dev_P3);
-	cudaDeviceSynchronize();
-
-	// device
-	Real*max_umag,*d_max_umag0;
-	cudaMalloc((void**)&max_umag,sizeof(Real)*num_part3);
-	cudaMalloc((void**)&d_max_umag0,sizeof(Real));
-	cudaMemset(max_umag,0,sizeof(Real)*num_part3);
-	cudaMemset(d_max_umag0,0,sizeof(Real));
-
-	// Sorting & Max variable to use CUB Library
-	void*dev_max_storage=NULL;
-	size_t max_storage_bytes=0;
-
-	// Determine Sorting & Maximum Value Setting for Total Particle Data
-	cub::DeviceReduce::Max(dev_max_storage,max_storage_bytes,max_umag,d_max_umag0,num_part3);
-	cudaDeviceSynchronize();
-	cudaMalloc((void**)&dev_max_storage,max_storage_bytes);
-	
-
-	kernel_copy_max_velocity<<<b,t>>>(dev_P1,dev_SP2,dev_P3,max_umag);
-	cudaDeviceSynchronize();
-
-	// Find Max Velocity & Force using CUB - TID=0
-	cub::DeviceReduce::Max(dev_max_storage,max_storage_bytes,max_umag,d_max_umag0,num_part3);
-	cudaDeviceSynchronize();
-
-	b.x=(num_part3-1)/t.x+1;
-	if(pst_solve==1){
-		calculate_w_dx(dev_P1);
-		cudaDeviceSynchronize();
-		if(dim==2) KERNEL_clc_particle_shifting_oger2D<<<b,t>>>(g_str,g_end,dev_P1,dev_SP2,dev_P3,dt,d_max_umag0);
-		cudaDeviceSynchronize();
-	}
-
-	cudaFree(d_max_umag0);
-	cudaFree(max_umag);
-
-	//-------------------------------------------------------------------------------------------------
-	// 출력
-	//-------------------------------------------------------------------------------------------------
-
-	if((time>=plotcount[0]*time_output)&&(time<(plotcount[0]+1)*time_output)){
-		plotcount[0]+=1;
-
-		int_t integer=ceil(time/time_output-0.5);
-
-		printf("save plot...........................\n");
-		cudaMemcpy(file_P1,dev_P1,num_part3*sizeof(part1),cudaMemcpyDeviceToHost);
-		cudaMemcpy(file_P2,dev_SP2,num_part3*sizeof(part2),cudaMemcpyDeviceToHost);
-		cudaMemcpy(file_P3,dev_P3,num_part3*sizeof(part3),cudaMemcpyDeviceToHost);
-
-		save_vtk_bin_single(file_P1,file_P2,file_P3);
-		
-		if(count==0) save_plot_fluid_vtk_bin_boundary(file_P1);
-		pressureprobe(time,file_P1,file_P3,&time0[integer],&P0[integer],&P1[integer],&P2[integer],&P3[integer],time0,P0,P1,P2,P3);
-
-		printf("time = %5.6f\n\n\n",time);
-	 }
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -187,7 +83,6 @@ void*ISPH_Calc(void*arg){
 	num_cells=clc_num_cells();
 
 	count=floor(time/dt+0.5);
-
 
 	//-------------------------------------------------------------------------------------------------
 	// Device 입자 생성
@@ -224,15 +119,6 @@ void*ISPH_Calc(void*arg){
 
 	// P2P 데이터 변수 선언
 	int*p2p_af_in,*p2p_idx_in,*p2p_af,*p2p_idx;
-
-	// // for Adaptive Particle Definement
-	// int*aps_num_part;
-	// cudaMalloc((void**)&aps_num_part,sizeof(int));
-	// cudaMemset(aps_num_part,k_num_part,sizeof(int));
-
-	// int*aps;
-	// cudaMalloc((void**)&aps,sizeof(int));
-	// cudaMemset(aps,0,sizeof(int));
 
 	// NNPS 입자 메모리 할당
 	cudaMalloc((void**)&g_idx,sizeof(int_t)*num_part3);
@@ -301,61 +187,62 @@ void*ISPH_Calc(void*arg){
 
 
 	//-------------------------------------------------------------------------------------------------
-// 화면 출력용 기타 변수들 정의 및 메모리 할당 (최대속도, 최대힘 등)
-//-------------------------------------------------------------------------------------------------
+	// 화면 출력용 기타 변수들 정의 및 메모리 할당 (최대속도, 최대힘 등)
+	//-------------------------------------------------------------------------------------------------
 
-// host
-Real *max_umag0,*max_rho0,*max_ftotal0,*max_phi0;
-max_umag0=(Real*)malloc(sizeof(Real));
-max_rho0=(Real*)malloc(sizeof(Real));
-max_ftotal0=(Real*)malloc(sizeof(Real));
-max_phi0=(Real*)malloc(sizeof(Real));
-max_umag0[0]=max_ftotal0[0]=max_rho0[0]=max_phi0[0]=0.0;
+	// host
+	Real *max_umag0,*max_rho0,*max_ftotal0,*max_phi0;
+	max_umag0=(Real*)malloc(sizeof(Real));
+	max_rho0=(Real*)malloc(sizeof(Real));
+	max_ftotal0=(Real*)malloc(sizeof(Real));
+	max_phi0=(Real*)malloc(sizeof(Real));
+	max_umag0[0]=max_ftotal0[0]=max_rho0[0]=max_phi0[0]=0.0;
 
-Real *dt10, *dt20, *dt30, *dt40, *dt50;
-dt10=(Real*)malloc(sizeof(Real));
-dt20=(Real*)malloc(sizeof(Real));
-dt30=(Real*)malloc(sizeof(Real));
-dt40=(Real*)malloc(sizeof(Real));
-dt50=(Real*)malloc(sizeof(Real));
-dt10[0]=dt20[0]=dt30[0]=dt40[0]=dt50[0]=0.0;
+	Real *dt10, *dt20, *dt30, *dt40, *dt50;
+	dt10=(Real*)malloc(sizeof(Real));
+	dt20=(Real*)malloc(sizeof(Real));
+	dt30=(Real*)malloc(sizeof(Real));
+	dt40=(Real*)malloc(sizeof(Real));
+	dt50=(Real*)malloc(sizeof(Real));
+	dt10[0]=dt20[0]=dt30[0]=dt40[0]=dt50[0]=0.0;
 
-// device
-Real*max_rho,*max_umag,*max_ft,*max_phi,*d_max_umag0,*d_max_rho0,*d_max_ftotal0,*d_max_phi0;
-cudaMalloc((void**)&max_rho,sizeof(Real)*num_part3);
-cudaMalloc((void**)&max_umag,sizeof(Real)*num_part3);
-cudaMalloc((void**)&max_ft,sizeof(Real)*num_part3);
-cudaMalloc((void**)&max_phi,sizeof(Real)*num_part3);
-cudaMalloc((void**)&d_max_umag0,sizeof(Real));
-cudaMalloc((void**)&d_max_rho0,sizeof(Real));
-cudaMalloc((void**)&d_max_ftotal0,sizeof(Real));
-cudaMalloc((void**)&d_max_phi0,sizeof(Real));
-cudaMemset(max_umag,0,sizeof(Real)*num_part3);
-cudaMemset(max_rho,0,sizeof(Real)*num_part3);
-cudaMemset(max_ft,0,sizeof(Real)*num_part3);
-cudaMemset(max_phi,0,sizeof(Real)*num_part3);
-cudaMemset(d_max_umag0,0,sizeof(Real));
-cudaMemset(d_max_rho0,0,sizeof(Real));
-cudaMemset(d_max_ftotal0,0,sizeof(Real));
-cudaMemset(d_max_phi0,0,sizeof(Real));
+	// device
+	Real*max_rho,*max_umag,*max_ft,*max_phi,*d_max_umag0,*d_max_rho0,*d_max_ftotal0,*d_max_phi0;
+	cudaMalloc((void**)&max_rho,sizeof(Real)*num_part3);
+	cudaMalloc((void**)&max_umag,sizeof(Real)*num_part3);
+	cudaMalloc((void**)&max_ft,sizeof(Real)*num_part3);
+	cudaMalloc((void**)&max_phi,sizeof(Real)*num_part3);
+	cudaMalloc((void**)&d_max_umag0,sizeof(Real));
+	cudaMalloc((void**)&d_max_rho0,sizeof(Real));
+	cudaMalloc((void**)&d_max_ftotal0,sizeof(Real));
+	cudaMalloc((void**)&d_max_phi0,sizeof(Real));
+	cudaMemset(max_umag,0,sizeof(Real)*num_part3);
+	cudaMemset(max_rho,0,sizeof(Real)*num_part3);
+	cudaMemset(max_ft,0,sizeof(Real)*num_part3);
+	cudaMemset(max_phi,0,sizeof(Real)*num_part3);
+	cudaMemset(d_max_umag0,0,sizeof(Real));
+	cudaMemset(d_max_rho0,0,sizeof(Real));
+	cudaMemset(d_max_ftotal0,0,sizeof(Real));
+	cudaMemset(d_max_phi0,0,sizeof(Real));
 
-Real *dt1, *dt2, *dt3, *dt4, *dt5;
-cudaMalloc((void**)&dt1,sizeof(Real)*num_part3);
-cudaMalloc((void**)&dt2,sizeof(Real)*num_part3);
-cudaMalloc((void**)&dt3,sizeof(Real)*num_part3);
-cudaMalloc((void**)&dt4,sizeof(Real)*num_part3);
-cudaMalloc((void**)&dt5,sizeof(Real)*num_part3);
-cudaMemset(dt1,0,sizeof(Real)*num_part3);
-cudaMemset(dt2,0,sizeof(Real)*num_part3);
-cudaMemset(dt3,0,sizeof(Real)*num_part3);
-cudaMemset(dt4,0,sizeof(Real)*num_part3);
-cudaMemset(dt5,0,sizeof(Real)*num_part3);
-Real *d_dt10, *d_dt20, *d_dt30, *d_dt40, *d_dt50;
-cudaMalloc((void**)&d_dt10,sizeof(Real));
-cudaMalloc((void**)&d_dt20,sizeof(Real));
-cudaMalloc((void**)&d_dt30,sizeof(Real));
-cudaMalloc((void**)&d_dt40,sizeof(Real));
-cudaMalloc((void**)&d_dt50,sizeof(Real));
+	Real *dt1, *dt2, *dt3, *dt4, *dt5;
+	cudaMalloc((void**)&dt1,sizeof(Real)*num_part3);
+	cudaMalloc((void**)&dt2,sizeof(Real)*num_part3);
+	cudaMalloc((void**)&dt3,sizeof(Real)*num_part3);
+	cudaMalloc((void**)&dt4,sizeof(Real)*num_part3);
+	cudaMalloc((void**)&dt5,sizeof(Real)*num_part3);
+	cudaMemset(dt1,0,sizeof(Real)*num_part3);
+	cudaMemset(dt2,0,sizeof(Real)*num_part3);
+	cudaMemset(dt3,0,sizeof(Real)*num_part3);
+	cudaMemset(dt4,0,sizeof(Real)*num_part3);
+	cudaMemset(dt5,0,sizeof(Real)*num_part3);
+	Real *d_dt10, *d_dt20, *d_dt30, *d_dt40, *d_dt50;
+	cudaMalloc((void**)&d_dt10,sizeof(Real));
+	cudaMalloc((void**)&d_dt20,sizeof(Real));
+	cudaMalloc((void**)&d_dt30,sizeof(Real));
+	cudaMalloc((void**)&d_dt40,sizeof(Real));
+	cudaMalloc((void**)&d_dt50,sizeof(Real));
+
 	//-------------------------------------------------------------------------------------------------
 	// 정렬(Sorting)을 위한 CUB 라이브러리 변수 준비
 	//-------------------------------------------------------------------------------------------------
@@ -372,7 +259,6 @@ cudaMalloc((void**)&d_dt50,sizeof(Real));
 	cudaDeviceSynchronize();
 	cudaMalloc((void**)&dev_sort_storage,sort_storage_bytes);
 	cudaMalloc((void**)&dev_max_storage,max_storage_bytes);
-	
 
 	//-------------------------------------------------------------------------------------------------
 	// 코드 메인
@@ -476,11 +362,6 @@ cudaMalloc((void**)&d_dt50,sizeof(Real));
 					cudaDeviceSynchronize();
 					cudaMemcpy(dt50,d_dt50,sizeof(Real),cudaMemcpyDeviceToHost);
 	
-					// Real h0 = HP1[0].h;
-					// Real dt_delta = 0.44*h0/delta/soundspeed;
-					// Real dt_vel = 0.25*(h0/(soundspeed))/sqrt(1000);
-					// Real dt_ft = 0.25*sqrt(h0/(max_ftotal0[0]+1E-10));
-					// Real dt_vis = 0.25*(h0*h0/0.01);
 					Real dt_delta = 0.1;
 					Real dt_vel = 1.0/dt10[0];
 					Real dt_ft = 0.1;
@@ -504,7 +385,8 @@ cudaMalloc((void**)&d_dt50,sizeof(Real));
 					if(integer){
 						kernel_copy_max<<<b,t>>>(dev_P1,dev_SP2,dev_SP3,max_rho,max_ft,max_umag);
 						cudaDeviceSynchronize();
-					// Find Max Velocity & Force using CUB - TID=0
+					
+						// Find Max Velocity & Force using CUB - TID=0
 					cub::DeviceReduce::Max(dev_max_storage,max_storage_bytes,max_umag,d_max_umag0,num_part3);
 					cub::DeviceReduce::Max(dev_max_storage,max_storage_bytes,max_rho,d_max_rho0,num_part3);
 					cub::DeviceReduce::Max(dev_max_storage,max_storage_bytes,max_ft,d_max_ftotal0,num_part3);
