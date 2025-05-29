@@ -4,6 +4,7 @@
 
 #include "common_includes.cuh"
 
+
 // NOTE: These are global variable declarations.
 // They are defined in a single .cu file (e.g., SophiaSim.cu),
 // and declared here using 'extern' to allow shared access across multiple source files.

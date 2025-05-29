@@ -3,14 +3,16 @@
 // Here we provide the actual definitions and memory allocation.
 // Only one definition is allowed across the entire program.
 
-#include "physicalproperties.cuh"
-#include <cuda_runtime.h>
+#include "common_includes.cuh"
 
 Real host_Tab_T[table_size];
 Real host_Tab_h[table_size];
 Real host_Tab_k[table_size];
 Real host_Tab_cp[table_size];
 Real host_Tab_vis[table_size];
+
+int host_table_index[10];
+int host_table_size[10];
 
 __constant__ Real k_Tab_T[table_size];
 __constant__ Real k_Tab_h[table_size];

@@ -460,7 +460,14 @@ void*ISPH_Calc(void*arg){
 	cudaMemcpyToSymbol(k_vif,vif,sizeof(Real)*vif_size);
 
 	// 물성 Table 데이터 Device로 복사
-	initializePropertyTables();
+	cudaMemcpyToSymbol(k_Tab_T,host_Tab_T,sizeof(Real)*table_size);
+	cudaMemcpyToSymbol(k_Tab_h,host_Tab_h,sizeof(Real)*table_size);
+	cudaMemcpyToSymbol(k_Tab_k,host_Tab_k,sizeof(Real)*table_size);
+	cudaMemcpyToSymbol(k_Tab_cp,host_Tab_cp,sizeof(Real)*table_size);
+	cudaMemcpyToSymbol(k_Tab_vis,host_Tab_vis,sizeof(Real)*table_size);
+
+	cudaMemcpyToSymbol(k_table_index,host_table_index,sizeof(int)*10);
+	cudaMemcpyToSymbol(k_table_size,host_table_size,sizeof(int)*10);
 
 	// Host 입자정보(HP1)를 분할하여(DHP1) Device로 복사(dev_P1)
 	DHP1[tid]=(part1*)malloc(num_part3*sizeof(part1));
