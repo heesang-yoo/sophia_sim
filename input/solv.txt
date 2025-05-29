@@ -1,0 +1,82 @@
+# SOPHIA Input: Solver Setup	// standard input
+solver_type (WCSPH/ISPH/ICSPH):							ISPH
+
+dimension(1/2/3): 											2
+property_table(YES/NO):									YES
+
+kernel type (Gaussian/Quartic/Quintic/Wendland[2/4/6]):		Wendland2
+filter type (Shepard/MLS): 									Shepard
+density calculation (Direct/Continuity): 				Continuity
+time integration (Euler/Predictor_Corrector): 				Predictor_Corrector
+scheme (Eulerian/Lagrangian/ALE): 								Lagrangian
+simulation type (Single_Phase/Two_Phase):					Single_Phase
+
+
+pressure-force solve(YES/NO): 								YES
+viscous-force solve(NO/Morris/Monaghan/Violeau): 						Monaghan
+viscosity-model (Newtonian/Non-newtonian):                  Newtonian
+turbulence-model (Laminar/k-lm/k-e/SPS/HB):                 Laminar
+gravitational-force solve(YES/NO): 							YES
+surface-tension-force solve(YES/NO): 						NO
+surface-tension-model (Potential/Curvature)					Curvature
+interface-sharpness-force solve(YES/NO):				NO
+boundary-force solve(YES/NO):								NO
+
+
+Conduction(YES/NO):											NO
+Boussinesq-natural-convection solve(YES/NO):				NO
+Concentration-diffusion(YES/NO):							NO
+XSPH solve(YES/NO): 										NO
+kernel-gradient-correction solve(NO/KGC/FPM/DFPM/KGF):				NO
+delta-SPH solve(NO/Molteni/Antuono):									Antuono
+particle-shifting solve(YES/NO):					NO
+penetration_box solve(YES/NO):           NO
+noslip_boundary (YES/NO):               NO
+open boundary (OPEN/PERIODIC/NO):				NO
+switch_ptype (YES/NO):          NO
+Multi-resolution solve(sameh/stiff/smooth/stiff_conserve/smooth_conserve):              stiff_conserve
+structure solve(YES/NO):              NO
+
+reference-pressure (Pa): 									0
+sound-speed:                                              340
+reference-density-eos:                                      1
+gamma (for EOS): 											1
+kappa: 														    3
+XSPH-coefficient:											0.0
+Boundary-coefficient:										0.0000001
+
+minimum-iteration:											3
+maximum-iteration:											10
+pressure-convergence criterion								10
+density-convergence criterion								0.005
+pressure-relaxation factor									1
+
+
+CFL_number       										  0.1
+CFL_number_ISPH  										  0.1
+time-step (sec): 										  2e-3
+time-step_ISPH (sec): 										  2e-3
+start-time (sec):											0
+end-time (sec):												10.01
+ball-velocity (m/s):                  110.0
+
+
+cell-initialization frequency: 								1
+z-indexing (YES/NO)											NO
+timestep update (YES/NO)									NO
+neighbor cell type (3X3/5X5)								3X3
+filtering frequency: 										20
+density-renormalization frequency: 						0
+temperature-filtering frequency:							10
+freq-output frequency:									50
+time-output frequency:									0.05
+plot-variables:                        5   pressure  p_type  velocity  lambda  shift
+velocity-limit (m/s): 										10
+
+
+Xmargin(-): 												0.0
+Xmargin(+): 												0.0
+Ymargin(-): 												0.0
+Ymargin(+): 												0.0
+Zmargin(-): 												0.0
+Zmargin(+): 												0.0
