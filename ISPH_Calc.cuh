@@ -8,154 +8,94 @@ void SOPHIA_single_ISPH(int_t*g_idx,int_t*p_idx,int_t*g_idx_in,int_t*p_idx_in,in
 	,Real*time0,Real*P0,Real*P1,Real*P2,Real*P3,int_t*plotcount)
 {
 
-dim3 b,t;
-t.x=128;
-b.x=(num_part3-1)/t.x+1;
-int s=sizeof(int)*(t.x+1);
+	dim3 b,t;
+	t.x=128;
+	b.x=(num_part3-1)/t.x+1;
+	int_t s=sizeof(int_t)*(t.x+1);
 
 
-KERNEL_set_ncell<<<b,t>>>(dev_P1,count);
-cudaDeviceSynchronize();
-
-if(scheme==Lagrangian){
-KERNEL_set_alpha_Lagrangian<<<b,t>>>(dev_P1);
-cudaDeviceSynchronize();
-}else if(scheme==ALE){
-KERNEL_set_alpha<<<b,t>>>(dev_P1);
-}
-
-
-//-------------------------------------------------------------------------------------------------
-// 주변입자 검색
-//-------------------------------------------------------------------------------------------------
-
-if(((scheme==Eulerian)&&(count==0))||(scheme>Eulerian)){
-
-// g_str을 리셋
-cudaMemset(g_str,cu_memset,sizeof(int_t)*num_cells);
-
-// 입자의 셀번호 계산
-b.x=(num_part3-1)/t.x+1;
-KERNEL_index_particle_to_cell<<<b,t>>>(g_idx_in,p_idx_in,dev_P1);
-cudaDeviceSynchronize();
-
-// 셀번호를 바탕으로 정렬
-cub::DeviceRadixSort::SortPairs(dev_sort_storage,*sort_storage_bytes,g_idx_in,g_idx,p_idx_in,p_idx,num_part3);
-cudaDeviceSynchronize();
-
-// 정렬한 입자를 재배치
-b.x=(num_part3-1)/t.x+1;
-KERNEL_reorder<<<b,t,s>>>(g_idx,p_idx,g_str,g_end,dev_P1,dev_P2,dev_SP1,dev_SP2);
-cudaDeviceSynchronize();
-
-// 일부 입자정보 리셋
-// cudaMemset(dev_P3,0,sizeof(part3)*num_part3);
-
-// 입자정보를 P1 에 복사
-cudaMemcpy(dev_P1,dev_SP1,sizeof(part1)*num_part3,cudaMemcpyDeviceToDevice);
-
-
-}else if((scheme==Eulerian)&&(count>0)){
-
-// 일부 입자정보 리셋
-// cudaMemset(dev_P3,0,sizeof(part3)*num_part3);
-
-// 입자정보를 P1 에 복사
-cudaMemcpy(dev_SP1,dev_P1,sizeof(part1)*num_part3,cudaMemcpyDeviceToDevice);
-
-cudaMemcpy(dev_SP2,dev_P2,sizeof(part2)*num_part3,cudaMemcpyDeviceToDevice);
-
-}
-
-if(multi_type==2||multi_type==4){
-	KERNEL_smoothing_length2D<<<b,t>>>(g_str,g_end,dev_SP1);
+	KERNEL_set_ncell<<<b,t>>>(dev_P1,count);
 	cudaDeviceSynchronize();
+
+	if(scheme==Lagrangian){
+	KERNEL_set_alpha_Lagrangian<<<b,t>>>(dev_P1);
+	cudaDeviceSynchronize();
+	}else if(scheme==ALE){
+	KERNEL_set_alpha<<<b,t>>>(dev_P1);
 	}
-	
-//-------------------------------------------------------------------------------------------------
-// 압력힘을 제외한 힘 계산
-//-------------------------------------------------------------------------------------------------
 
-// Velocity condition for wall
-b.x=(num_part3-1)/t.x+1;
-if((noslip_bc==1)||(penetration_solve==1)){
-	if(dim==2) KERNEL_boundary2D<<<b,t>>>(g_str,g_end,dev_SP1);
-	if(dim==3) KERNEL_boundary3D<<<b,t>>>(g_str,g_end,dev_SP1);
+
+	//-------------------------------------------------------------------------------------------------
+	// 주변입자 검색
+	//-------------------------------------------------------------------------------------------------
+
+	// Call NNPS for neighbor search and sorting
+	NNPS(
+		g_idx_in, g_idx,
+		p_idx_in, p_idx,
+		g_str, g_end,
+		dev_P1, dev_SP1,
+		dev_P2, dev_SP2,
+		dev_sort_storage, sort_storage_bytes,
+		b, t, s
+	);
+
+	//-------------------------------------------------------------------------------------------------
+	// 압력힘을 제외한 힘 계산
+	//-------------------------------------------------------------------------------------------------
+
+	// Velocity condition for wall
+	if((noslip_bc==1)||(penetration_solve==1)){
+		if(dim==2) KERNEL_boundary2D<<<b,t>>>(g_str,g_end,dev_SP1);
+		if(dim==3) KERNEL_boundary3D<<<b,t>>>(g_str,g_end,dev_SP1);
+		cudaDeviceSynchronize();
+	}
+			
+	if(dim==2) KERNEL_advection_force2D<<<b,t>>>(time,1,g_str,g_end,dev_SP1,dev_SP2,dev_P3);
+	if(dim==3) KERNEL_advection_force3D<<<b,t>>>(1,g_str,g_end,dev_SP1,dev_SP2,dev_P3);
 	cudaDeviceSynchronize();
-}
-		
-b.x=(num_part3-1)/t.x+1;
-if(dim==2) KERNEL_advection_force2D<<<b,t>>>(time,1,g_str,g_end,dev_SP1,dev_SP2,dev_P3);
-if(dim==3) KERNEL_advection_force3D<<<b,t>>>(1,g_str,g_end,dev_SP1,dev_SP2,dev_P3);
-cudaDeviceSynchronize();
 
-//-------------------------------------------------------------------------------------------------
-// PREDICTOR (Optional)
-//-------------------------------------------------------------------------------------------------
+	//-------------------------------------------------------------------------------------------------
+	// PREDICTOR (Optional)
+	//-------------------------------------------------------------------------------------------------
 
-if(time_type==Pre_Cor){
-b.x=(num_part3-1)/t.x+1;
-KERNEL_clc_projection<<<b,t>>>(count,dt,time,dev_SP1,dev_SP2,dev_P3);
-cudaDeviceSynchronize();
+	KERNEL_clc_projection<<<b,t>>>(count,dt,time,dev_SP1,dev_SP2,dev_P3);
+	cudaDeviceSynchronize();
 
-// IBM_predictor<<<b,t>>>(dt_structure,time,dev_SP1,dev_SP2);
-// cudaDeviceSynchronize();
-}
+	//-------------------------------------------------------------------------------------------------
+	// 계산 준비: gradient correction, filter, reference density, p_type switch, penetration, density gradient
+	//-------------------------------------------------------------------------------------------------
 
-//-------------------------------------------------------------------------------------------------
-// 계산 준비: gradient correction, filter, reference density, p_type switch, penetration, density gradient
-//-------------------------------------------------------------------------------------------------
+	gradient_correction(g_str,g_end,dev_SP1,dev_P3);
+	cudaDeviceSynchronize();
 
-b.x=(num_part3-1)/t.x+1;
-// 미분보정필터 계산
-gradient_correction(g_str,g_end,dev_SP1,dev_P3);
-cudaDeviceSynchronize();
-// if(dim==2) KERNEL_clc_correction_preLaplacian<<<b,t>>>(g_str,g_end,dev_SP1,dev_P3);
-// cudaDeviceSynchronize();
-// if(dim==2) KERNEL_clc_correction_Laplacian<<<b,t>>>(g_str,g_end,dev_SP1,dev_P3);
-// cudaDeviceSynchronize();
-// KERNEL_clc_invA_MLS_2D<<<b,t>>>(g_str,g_end,dev_SP1,dev_P3);
-// cudaDeviceSynchronize();
+	if(dim==2) KERNEL_clc_prep2D<<<b,t>>>(g_str,g_end,dev_SP1, dev_SP2, dev_P3, count);
+	if(dim==3) KERNEL_clc_prep3D<<<b,t>>>(g_str,g_end,dev_SP1, dev_SP2, dev_P3, count);
+	cudaDeviceSynchronize();
 
-// filter, reference density, p_type switch, penetration, normal gradient etc
-if(dim==2) KERNEL_clc_prep2D<<<b,t>>>(g_str,g_end,dev_SP1, dev_SP2, dev_P3, count);
-if(dim==3) KERNEL_clc_prep3D<<<b,t>>>(g_str,g_end,dev_SP1, dev_SP2, dev_P3, count);
-cudaDeviceSynchronize();
+	//-------------------------------------------------------------------------------------------------
+	// 압력 계산
+	//-------------------------------------------------------------------------------------------------
 
-//-------------------------------------------------------------------------------------------------
-// 표면입자 추출
-//-------------------------------------------------------------------------------------------------
+	// For initial condition
+	if(count==0){
+		if(dim==2)	KERNEL_Neumann_boundary2D<<<b,t>>>(g_str,g_end,dev_SP1,dev_SP2,dev_P3);
+		if(dim==3)	KERNEL_Neumann_boundary3D<<<b,t>>>(g_str,g_end,dev_SP1,dev_SP2,dev_P3);
+		cudaDeviceSynchronize();
+	}
 
-// Detection
-// if(dim==2)	KERNEL_clc_surface_detect2D<<<b,t>>>(g_str,g_end,dev_SP1,dev_P3);
-// cudaDeviceSynchronize();
+	if(dim==2)	KERNEL_PPE2D<<<b,t>>>(dt,g_str,g_end,dev_SP1,dev_SP2,dev_P3,0);
+	if(dim==3)	KERNEL_PPE3D<<<b,t>>>(dt,g_str,g_end,dev_SP1,dev_SP2,dev_P3);
+	cudaDeviceSynchronize();
 
-//-------------------------------------------------------------------------------------------------
-// 압력 계산
-//-------------------------------------------------------------------------------------------------
-
-// For initial condition
-if(count==0){
+	// Pressure condition for wall
 	if(dim==2)	KERNEL_Neumann_boundary2D<<<b,t>>>(g_str,g_end,dev_SP1,dev_SP2,dev_P3);
 	if(dim==3)	KERNEL_Neumann_boundary3D<<<b,t>>>(g_str,g_end,dev_SP1,dev_SP2,dev_P3);
-cudaDeviceSynchronize();
-}
+	cudaDeviceSynchronize();
 
-for(int_t it=0;it<=0;it++){
-// PPE
-if(dim==2)	KERNEL_PPE2D<<<b,t>>>(dt,g_str,g_end,dev_SP1,dev_SP2,dev_P3,it);
-if(dim==3)	KERNEL_PPE3D<<<b,t>>>(dt,g_str,g_end,dev_SP1,dev_SP2,dev_P3);
-cudaDeviceSynchronize();
-
-// Pressure condition for wall
-if(dim==2)	KERNEL_Neumann_boundary2D<<<b,t>>>(g_str,g_end,dev_SP1,dev_SP2,dev_P3);
-if(dim==3)	KERNEL_Neumann_boundary3D<<<b,t>>>(g_str,g_end,dev_SP1,dev_SP2,dev_P3);
-cudaDeviceSynchronize();
-}
-
-//-------------------------------------------------------------------------------------------------
-// 압력힘 계산
-//-------------------------------------------------------------------------------------------------
+	//-------------------------------------------------------------------------------------------------
+	// 압력힘 계산
+	//-------------------------------------------------------------------------------------------------
 
 	b.x=(num_part3-1)/t.x+1;
 	if(dim==2) KERNEL_pressureforce2D<<<b,t>>>(1,g_str,g_end,dev_SP1,dev_SP2,dev_P3);
@@ -163,50 +103,13 @@ cudaDeviceSynchronize();
 	cudaDeviceSynchronize();
 
 
-//-------------------------------------------------------------------------------------------------
-// Immersed Boundary Method (IBM)
-//-------------------------------------------------------------------------------------------------
+	//-------------------------------------------------------------------------------------------------
+	// 시간 적분 (Time Integration)
+	//-------------------------------------------------------------------------------------------------
 
-// b.x=(num_part3-1)/t.x+1;
-// if(dim==2) IBM_force_interpolation<<<b,t>>>(dt,g_str,g_end,dev_SP1,dev_SP2,dev_P3);
-// cudaDeviceSynchronize();
-
-
-// if(dim==2) IBM_spreading_interpolation<<<b,t>>>(g_str,g_end,dev_SP1,dev_SP2,dev_P3);
-// cudaDeviceSynchronize();
-
-//-------------------------------------------------------------------------------------------------
-// 시간 적분 (Time Integration)
-//-------------------------------------------------------------------------------------------------
-
-b.x=(num_part3-1)/t.x+1;
-KERNEL_time_update_projection<<<b,t>>>(dt,dev_SP1,dev_P1,dev_SP2,dev_P2,dev_P3);
-cudaDeviceSynchronize();
-
-// IBM_corrector<<<b,t>>>(dt_structure,time,dev_SP1,dev_P1,dev_SP2,dev_P3);
-// cudaDeviceSynchronize();
-
-//-------------------------------------------------------------------------------------------------
-// Open Boudnary
-//-------------------------------------------------------------------------------------------------
-
-// if(count%(lap)==0){
-
-// b.x=(num_part3-1)/t.x+1;
-// if(open_boundary>0)
-// {
-// if(dim==2){
-// KERNEL_open_boundary_extrapolation2D<<<b,t>>>(time, g_str,g_end,dev_P1,dev_SP2,dev_P3,count,dt);
-// cudaDeviceSynchronize();
-// }
-
-// KERNEL_time_update_buffer<<<b,t>>>(dt,dev_SP1,dev_P1,dev_SP2,dev_P3,space,Nsx,Nsz);
-// cudaDeviceSynchronize();
-// }
-
-
-// if(dim==2) KERNEL_clc_normalvectorforpst<<<b,t>>>(g_str,g_end,dev_P1, dev_SP2, dev_P3, count);
-// cudaDeviceSynchronize();
+	b.x=(num_part3-1)/t.x+1;
+	KERNEL_time_update_projection<<<b,t>>>(dt,dev_SP1,dev_P1,dev_SP2,dev_P2,dev_P3);
+	cudaDeviceSynchronize();
 
 	// device
 	Real*max_umag,*d_max_umag0;
@@ -234,101 +137,14 @@ cudaDeviceSynchronize();
 
 	b.x=(num_part3-1)/t.x+1;
 	if(pst_solve==1){
-	calculate_w_dx(dev_P1);
-	cudaDeviceSynchronize();
-	// if(dim==2) KERNEL_clc_particle_shifting_lind2D<<<b,t>>>(g_str,g_end,dev_P1,dev_SP2,dev_P3,dt);
-	if(dim==2) KERNEL_clc_particle_shifting_oger2D<<<b,t>>>(g_str,g_end,dev_P1,dev_SP2,dev_P3,dt,d_max_umag0);
-	// if(dim==2) KERNEL_clc_particle_shifting_oger2D2<<<b,t>>>(g_str,g_end,dev_P1,dev_SP2,dev_P3,dt,d_max_umag0);
-	// if(dim==3) KERNEL_clc_particle_shifting_lind3D<<<b,t>>>(g_str,g_end,dev_P1,dev_SP2,dev_P3,dt);
-	cudaDeviceSynchronize();
-	// if(dim==2) KERNEL_clc_particle_shifting_lind2D2<<<b,t>>>(g_str,g_end,dev_P1,dev_SP2,dev_P3,dt);
-	// cudaDeviceSynchronize();
+		calculate_w_dx(dev_P1);
+		cudaDeviceSynchronize();
+		if(dim==2) KERNEL_clc_particle_shifting_oger2D<<<b,t>>>(g_str,g_end,dev_P1,dev_SP2,dev_P3,dt,d_max_umag0);
+		cudaDeviceSynchronize();
 	}
 
 	cudaFree(d_max_umag0);
 	cudaFree(max_umag);
-
-// //-------------------------------------------------------------------------------------------------
-// // particle splitting/merging
-// //-------------------------------------------------------------------------------------------------
-
-// if((aps_solv)&(count%100==0)) //임시로함.
-// {
-// 	int APS_num[5]={0,0,0,0,0};
-// 	int*dev_APS_num;
-// 	cudaMalloc((void**)&dev_APS_num,5*sizeof(int));
-// 	cudaMemset(dev_APS_num,0,5*sizeof(int));
-
-// 	KERNEL_reset_APS_variables<<<b,t>>>(dev_P1);
-// 	cudaDeviceSynchronize();
-
-// 	b.x=(num_part3-1)/t.x+1;
-// 	if(dim==2) KERNEL_APS_condition2D<<<b,t>>>(dt,time,dev_P1,dev_APS_num,g_str,g_end,aps);
-// 	// if(dim==3) KERNEL_APS_condition3D<<<b,t>>>(dev_P1,dev_APS_num,g_str,g_end);
-// 	cudaDeviceSynchronize();
-
-// 	cudaMemcpy(APS_num,dev_APS_num,5*sizeof(int),cudaMemcpyDeviceToHost);
-
-// 	if(count%freq_output==0){
-// 		printf("number of splitting particles = %d \n",APS_num[1]);
-// 		printf("number of merging particles = %d \n",APS_num[2]);
-// 	}
-
-// 		if(APS_num[0]==1){                                   //calculating APS
-
-// 		int*mutex;
-// 		cudaMalloc((void**)&mutex,sizeof(int));
-// 		cudaMemset(mutex,0,sizeof(int));
-// 		// if(APS_num[1]>0){                                 //particle splitting
-
-// 		// if(APS_num[1]>1) t.x=1;
-// 		// else t.x=128;
-// 		t.x=1;
-// 		b.x=(num_part3-1)/t.x+1;
-// 		KERNEL_assign_split_num<<<b,t>>>(dev_P1,dev_APS_num,mutex);
-// 		cudaDeviceSynchronize();
-
-// 		t.x=1;
-// 		b.x=(num_part3-1)/t.x+1;
-// 		if(dim==2) KERNEL_particle_splitting2D<<<b,t>>>(count,dev_P1,aps_num_part,mutex);
-// 		// if(dim==3) KERNEL_particle_splitting3D<<<b,t>>>(dev_P1,aps_num_part);
-// 		cudaDeviceSynchronize();
-
-// 		// }
-
-// 		//  if(APS_num[2]>=1){    															 //particle merging
-// 		// 	t.x=1;
-// 		// 	b.x=(num_part3-1)/t.x+1;
-// 		// 	KERNEL_merge_or_not<<<b,t>>>(dev_P1,g_str,g_end,mutex);
-// 		// 	cudaDeviceSynchronize();
-
-// 		// 	// if(APS_num[2]>1) t.x=1;
-// 		// 	// else t.x=128;
-// 		// 	t.x=1;
-// 		// 	b.x=(num_part3-1)/t.x+1;
-// 		// 	if(dim==2) KERNEL_assign_merge_num2D<<<b,t>>>(dev_P1,g_str,g_end,dev_APS_num,mutex,aps);
-// 		// 	// if(dim==3) KERNEL_assign_merge_num3D<<<b,t>>>(dev_P1,g_str,g_end,dev_APS_num,mutex);
-// 		// 	cudaDeviceSynchronize();
-
-// 		// 	// cudaMemcpy(APS_num,dev_APS_num,5*sizeof(int),cudaMemcpyDeviceToHost);
-// 		// 	// if(APS_num[4]>1)	printf("number of merging process = %d \n",APS_num[4]);
-
-// 		// 	// cudaMemcpy(file_P1,dev_P1,num_part3*sizeof(part1),cudaMemcpyDeviceToHost);
-// 		// 	// cudaMemcpy(file_P3,dev_P3,num_part3*sizeof(part3),cudaMemcpyDeviceToHost);
-// 		// 	// save_vtk_bin_single(file_P1,file_P3);
-
-// 		// 	t.x=1;
-// 		// 	b.x=(num_part3-1)/t.x+1;
-// 		// 	if(dim==2) KERNEL_particle_merging2D<<<b,t>>>(dev_P1,g_str,g_end,aps_num_part,dev_APS_num,aps,mutex);
-// 		// 	// if(dim==3) KERNEL_particle_merging3D<<<b,t>>>(dev_P1,g_str,g_end,aps_num_part,dev_APS_num);
-// 		// 	cudaDeviceSynchronize();
-
-// 		// }
-// 	num_part=k_num_part;
-// 	cudaFree(mutex);
-// 	}
-// 	cudaFree(dev_APS_num);
-// 	}
 
 	//-------------------------------------------------------------------------------------------------
 	// 출력
@@ -346,9 +162,6 @@ cudaDeviceSynchronize();
 
 		save_vtk_bin_single(file_P1,file_P2,file_P3);
 		
-		// save_restart(file_P1,file_P2,file_P3);
-
-
 		if(count==0) save_plot_fluid_vtk_bin_boundary(file_P1);
 		pressureprobe(time,file_P1,file_P3,&time0[integer],&P0[integer],&P1[integer],&P2[integer],&P3[integer],time0,P0,P1,P2,P3);
 
@@ -638,11 +451,6 @@ cudaMalloc((void**)&d_dt50,sizeof(Real));
 					b.x=(num_part3-1)/t.x+1;
 					kernel_copy_max_timestep<<<b,t>>>(dev_P1,dev_SP2,dev_SP3,dt1, dt2, dt3, dt4, dt5);
 					cudaDeviceSynchronize();
-					cudaError_t err = cudaGetLastError();
-					if (err != cudaSuccess) {
-						printf("CUDA kernel error: %s\n", cudaGetErrorString(err));
-					}
-
 					// Find Max Velocity & Force using CUB - TID=0
 					cub::DeviceReduce::Max(dev_max_storage,max_storage_bytes,max_phi,d_max_phi0,num_part3);
 					cub::DeviceReduce::Max(dev_max_storage,max_storage_bytes,max_ft,d_max_ftotal0,num_part3);
@@ -673,10 +481,6 @@ cudaMalloc((void**)&d_dt50,sizeof(Real));
 					// Real dt_vel = 0.25*(h0/(soundspeed))/sqrt(1000);
 					// Real dt_ft = 0.25*sqrt(h0/(max_ftotal0[0]+1E-10));
 					// Real dt_vis = 0.25*(h0*h0/0.01);
-					Real check_dt;
-					cudaMemcpy(&check_dt, d_dt10, sizeof(Real), cudaMemcpyDeviceToHost);
-					printf("🔍 dt10 = %e\n", check_dt);  // 0이면 문제
-
 					Real dt_delta = 0.1;
 					Real dt_vel = 1.0/dt10[0];
 					Real dt_ft = 0.1;
@@ -777,7 +581,6 @@ cudaMalloc((void**)&d_dt50,sizeof(Real));
 	cudaFree(d_max_ftotal0);
 	cudaFree(dev_sort_storage);
 	cudaFree(dev_max_storage);
-	
 
 	return 0;
 }

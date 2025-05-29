@@ -558,3 +558,55 @@ __global__ void KERNEL_index_particle_to_cell(int_t*g_idx,int_t*p_idx,part1*P1)
 
 	if(g_idx[idx]==k_num_cells && P1[idx].i_type!=3) printf("itype %d \n", P1[idx].i_type);
 }
+/////////////////////////////////////////////////////////////////////////
+// Neighbor-Numbering and Particle Sorting (NNPS)
+void NNPS(
+    int_t* g_idx_in, int_t* g_idx,
+    int_t* p_idx_in, int_t* p_idx,
+    int_t* g_str, int_t* g_end,
+    part1* dev_P1, part1* dev_SP1,
+    part2* dev_P2, part2* dev_SP2,
+    void* dev_sort_storage, size_t* sort_storage_bytes,
+    dim3 b, dim3 t, int_t s) {
+
+    // If this is the first step (Eulerian) or a Lagrangian update:
+    if (((scheme == Eulerian) && (count == 0)) || (scheme > Eulerian)) {
+        // 1. Reset g_str (cell start index)
+        cudaMemset(g_str, cu_memset, sizeof(int_t) * num_cells);
+
+        // 2. Assign cell indices to particles
+        b.x = (num_part3 - 1) / t.x + 1;
+        KERNEL_index_particle_to_cell<<<b, t>>>(g_idx_in, p_idx_in, dev_P1);
+        cudaDeviceSynchronize();
+
+        // 3. Sort particle indices by cell using CUB
+        cub::DeviceRadixSort::SortPairs(
+            dev_sort_storage, *sort_storage_bytes,
+            g_idx_in, g_idx, p_idx_in, p_idx, num_part3
+        );
+        cudaDeviceSynchronize();
+
+        // 4. Reorder particles based on sorted indices
+        b.x = (num_part3 - 1) / t.x + 1;
+        KERNEL_reorder<<<b, t, s>>>(g_idx, p_idx, g_str, g_end, dev_P1, dev_P2, dev_SP1, dev_SP2);
+        cudaDeviceSynchronize();
+
+        // (Optional) Reset dev_P3 if needed
+        // cudaMemset(dev_P3, 0, sizeof(part3) * num_part3);
+
+        // 5. Copy reordered particle data back to dev_P1
+        cudaMemcpy(dev_P1, dev_SP1, sizeof(part1) * num_part3, cudaMemcpyDeviceToDevice);
+
+    } else if ((scheme == Eulerian) && (count > 0)) {
+        // For subsequent Eulerian steps (no sorting needed):
+
+        // (Optional) Reset dev_P3 if needed
+        // cudaMemset(dev_P3, 0, sizeof(part3) * num_part3);
+
+        // 1. Copy dev_P1 to dev_SP1
+        cudaMemcpy(dev_SP1, dev_P1, sizeof(part1) * num_part3, cudaMemcpyDeviceToDevice);
+
+        // 2. Copy dev_P2 to dev_SP2
+        cudaMemcpy(dev_SP2, dev_P2, sizeof(part2) * num_part3, cudaMemcpyDeviceToDevice);
+    }
+}

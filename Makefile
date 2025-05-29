@@ -4,34 +4,27 @@ CC = nvcc
 # Compiler flags
 CFLAGS = -w -use_fast_math -arch=sm_60 -O3 -expt-relaxed-constexpr
 
-# Libraries
-LIBS = -lpthread
-
 # Include directories
 INCLUDE = -I/home/yhs/peridynamics/cub-1.8.0/ -I/usr/local/cuda/samples/common/inc
 
-# Source files
-SRCS = SOPHIA_gpu.cu SophiaSim.cu physicalproperties.cu
+# Libraries
+LIBS = -lpthread
 
-# Object files (optional, not used here but useful for extension)
-OBJS = $(SRCS:.cu=.o)
-
-# Target executable
+# Target
 TARGET = SOPHIA_gpu
 
-# Default target
+# Source files
+SRCS = SOPHIA_gpu.cu
+OBJS = $(SRCS:.cu=.o)
+
+# Default rule
 all: $(TARGET)
 
-# Rule to build the target executable
-$(TARGET): $(SRCS)
-	$(CC) $(CFLAGS) $(SRCS) -o $(TARGET) $(INCLUDE) $(LIBS)
+$(TARGET): $(OBJS)
+	$(CC) $(CFLAGS) -o $@ $^ $(INCLUDE) $(LIBS)
 
-# Clean intermediate object files
-clean_intermediate:
-	rm -f $(OBJS)
+%.o: %.cu
+	$(CC) $(CFLAGS) -c $< -o $@ $(INCLUDE)
 
-# Clean everything
-clean: clean_intermediate
-	rm -f $(TARGET)
-
-.PHONY: all clean clean_intermediate
+clean:
+	rm -f $(TARGET) *.o
