@@ -1,0 +1,1 @@
+/usr/lib/nvidia-cuda-toolkit/bin/g++ CMakeFiles/SOPHIA_gpu.dir/src/SOPHIA_gpu.cu.o -o /home/yhs/sph-modelica/test-sloshing-6-restructure/SOPHIA_gpu  -lcudadevrt -lcudart_static -lrt -lpthread -ldl  -L"/usr/lib/x86_64-linux-gnu/stubs"

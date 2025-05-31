@@ -1,0 +1,3 @@
+/home/yhs/sph-modelica/test-sloshing-6-restructure/build/CMakeFiles/SOPHIA_gpu.dir
+/home/yhs/sph-modelica/test-sloshing-6-restructure/build/CMakeFiles/edit_cache.dir
+/home/yhs/sph-modelica/test-sloshing-6-restructure/build/CMakeFiles/rebuild_cache.dir
